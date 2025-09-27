@@ -1,3 +1,10 @@
+# 1.0.0 (2025-09-27)
+
+
+### Features
+
+* add comprehensive tech stack documentation ([d4b1e6b](https://github.com/Hero4440/sunHacks2026/commit/d4b1e6bf3f0c8f89d3b98b6470cb8844059ce5ea))
+
 ## [1.7.6](https://github.com/ixartz/SaaS-Boilerplate/compare/v1.7.5...v1.7.6) (2025-05-01)
 
 
