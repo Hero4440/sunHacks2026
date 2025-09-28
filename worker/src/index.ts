@@ -31,7 +31,14 @@ type ResponseMeta = {
 
 type ActionStep = AutomationAction;
 
-type AskResult = ResponseMeta & { answer: string };
+type IntentResult = {
+  kind: string;
+  confidence?: number;
+  payload?: Record<string, unknown>;
+  tabQuery?: string;
+};
+
+type AskResult = ResponseMeta & { answer?: string; intent?: IntentResult };
 type PlanResult = ResponseMeta & { steps: AutomationPlan };
 type SummarizeResult = ResponseMeta & { summary: string };
 
@@ -56,6 +63,8 @@ const contextSchema = z.object({
 const askSchema = z.object({
   query: z.string().min(1),
   context: contextSchema.optional(),
+  mode: z.enum(['ask', 'intent']).optional(),
+  expectedKinds: z.array(z.string()).optional(),
 });
 
 const planSchema = z.object({
@@ -177,6 +186,10 @@ app.post('/api/summarize', async (c) => {
 });
 
 async function executeAsk(env: EnvBindings, request: z.infer<typeof askSchema>) {
+  if (request.mode === 'intent') {
+    return executeIntent(env, request);
+  }
+
   const prompt = buildAskPrompt(request);
   const fallback = {
     answer: 'LLM integration pending — returning canned response.',
@@ -224,11 +237,78 @@ async function executeAsk(env: EnvBindings, request: z.infer<typeof askSchema>) 
   return fallback;
 }
 
+async function executeIntent(env: EnvBindings, request: z.infer<typeof askSchema>) {
+  const fallbackIntent: IntentResult = {
+    kind: 'unknown',
+    confidence: 0,
+    payload: { reason: 'fallback' },
+  };
+
+  const fallback: AskResult = {
+    intent: fallbackIntent,
+    model_used: 'stub',
+    source: 'stub',
+    tokens_in: 0,
+    tokens_out: 0,
+    cached: false,
+  };
+
+  if (!env.GEMINI_API_KEY) {
+    return fallback;
+  }
+
+  const prompt = buildIntentPrompt(request);
+
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      kind: { type: 'string' },
+      payload: { type: 'object', additionalProperties: true },
+      confidence: { type: 'number' },
+      tabQuery: { type: 'string' },
+    },
+    required: ['kind'],
+    additionalProperties: false,
+  };
+
+  const llm = await callGemini<IntentResult>(env, {
+    label: 'intent',
+    prompt,
+    temperature: 0.1,
+    responseMimeType: 'application/json',
+    responseSchema,
+    defaultValue: fallbackIntent,
+    extract: resp => extractJson<IntentResult>(resp),
+  });
+
+  if (llm) {
+    return {
+      intent: normalizeIntent(llm.data),
+      ...llm.meta,
+    } satisfies AskResult;
+  }
+
+  const workers = await callWorkersAI<IntentResult>(env, {
+    label: 'intent',
+    prompt,
+    temperature: 0.1,
+    defaultValue: fallbackIntent,
+    extract: resp => extractWorkersJson<IntentResult>(resp),
+  });
+
+  if (workers) {
+    return {
+      intent: normalizeIntent(workers.data),
+      ...workers.meta,
+    } satisfies AskResult;
+  }
+
+  return fallback;
+}
+
 async function executePlan(env: EnvBindings, request: z.infer<typeof planSchema>) {
   const prompt = buildPlanPrompt(request);
-  const fallbackSteps: AutomationPlan = [
-    { act: 'find', target: 'TODO integrate Gemini planner' },
-  ];
+  const fallbackSteps: AutomationPlan = [];
   const fallback = {
     steps: fallbackSteps,
     model_used: 'stub',
@@ -524,8 +604,50 @@ function buildSummarizePrompt(request: z.infer<typeof summarizeSchema>) {
   return lines.join('\n');
 }
 
+function buildIntentPrompt(request: z.infer<typeof askSchema>) {
+  const lines: string[] = [
+    'You are Naros, a privacy-first browsing copilot. Your job is to classify the user\'s request into a browser intent that the extension can execute.',
+    'Return a JSON object with the shape: { "kind": string, "payload": object, "confidence": number }. For tab switching also include "tabQuery" with the best string to search for.',
+    'Supported intents and payloads:',
+    '- open_url: payload { "url": string, "active": boolean (default true) }',
+    '- navigate: payload { "direction": "back" | "forward" | "reload" }',
+    '- browser_command: payload { "command": "new_tab" | "close_tab" }',
+    '- set_zoom: payload { "value": number } where value is the desired zoom percentage (e.g. 125 for 125%)',
+    '- screenshot: payload { "mode": "visible" | "full" }',
+    '- switch_tab: payload { "tabQuery": string } and set tabQuery field as well, to help the client find the tab',
+    '- search_history: payload { "query": string } to instruct opening a history search',
+    '- unknown: use when the request should not be executed; include a short reason in payload.reason',
+    'Never produce JavaScript, CSS selectors, or instructions that interact with passwords or payments.',
+    `User request: ${request.query}`,
+  ];
+
+  if (request.expectedKinds?.length) {
+    lines.push(`The caller expects one of these kinds: ${request.expectedKinds.join(', ')}`);
+  }
+
+  if (request.context) {
+    const { title, url, selection, headings } = request.context;
+    if (title) {
+      lines.push(`Page title: ${title}`);
+    }
+    if (url) {
+      lines.push(`Page URL: ${url}`);
+    }
+    if (headings?.length) {
+      lines.push('Headings:');
+      headings.forEach(h => lines.push(`- ${h}`));
+    }
+    if (selection) {
+      lines.push(`Selection: ${selection}`);
+    }
+  }
+
+  lines.push('Return JSON only with keys kind, payload, confidence. Confidence must be between 0 and 1.');
+  return lines.join('\n');
+}
+
 type GeminiCallOptions<T> = {
-  label: 'ask' | 'plan' | 'summarize';
+  label: 'ask' | 'plan' | 'summarize' | 'intent';
   prompt: string;
   temperature?: number;
   responseMimeType?: 'application/json';
@@ -632,7 +754,7 @@ function extractJson<T>(response: GeminiContentResponse) {
 }
 
 type WorkersAICallOptions<T> = {
-  label: 'ask' | 'plan' | 'summarize';
+  label: 'ask' | 'plan' | 'summarize' | 'intent';
   prompt: string;
   temperature?: number;
   defaultValue: T;
@@ -711,4 +833,39 @@ function extractWorkersJson<T>(response: WorkersAIResponse) {
     console.error('Workers AI JSON parse failed', error, text);
     return undefined;
   }
+}
+
+function normalizeIntent(intent: IntentResult | undefined | null): IntentResult {
+  if (!intent || typeof intent !== 'object') {
+    return { kind: 'unknown' };
+  }
+
+  const kind = typeof intent.kind === 'string' && intent.kind.trim().length > 0
+    ? intent.kind.trim()
+    : 'unknown';
+
+  const confidence = typeof intent.confidence === 'number'
+    ? Math.max(0, Math.min(1, intent.confidence))
+    : undefined;
+
+  const payload = intent.payload && typeof intent.payload === 'object'
+    ? intent.payload
+    : undefined;
+
+  const tabQuery = typeof intent.tabQuery === 'string' && intent.tabQuery.trim().length > 0
+    ? intent.tabQuery.trim()
+    : undefined;
+
+  const normalized: IntentResult = { kind };
+  if (confidence !== undefined) {
+    normalized.confidence = confidence;
+  }
+  if (payload) {
+    normalized.payload = payload;
+  }
+  if (tabQuery && !normalized.payload?.tabQuery) {
+    normalized.tabQuery = tabQuery;
+    normalized.payload = { ...normalized.payload, tabQuery };
+  }
+  return normalized;
 }

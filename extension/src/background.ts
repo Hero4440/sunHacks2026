@@ -1,12 +1,13 @@
 // Nebula AI Copilot - Background Service Worker
 // Handles Spotlight search, tab management, and API communication
 
-import type { WorkerAnswer } from './lib/api-client';
-import { askWorker } from './lib/api-client';
+import type { WorkerAnswer, WorkerPlan, WorkerIntent } from './lib/api-client';
+import { askWorker, planWorker } from './lib/api-client';
 import { type ContextBundle, ContextBundler, type PageData } from './lib/context-bundler';
 import { MessageRouter } from './lib/messaging';
 import { type SpotlightAction, SpotlightEngine } from './lib/spotlight';
 import { NebulaStorage } from './lib/storage';
+import type { AutomationAction, ExecutionSummary } from '../../shared/automation';
 
 type ToastVariant = 'success' | 'warning' | 'error' | 'info';
 
@@ -35,6 +36,8 @@ class NebulaBackground {
     previousWindowId: number;
     undoId: string;
     createdAt: number;
+    createdTabId?: number;
+    createdWindowId?: number;
   };
 
   private tabRequestLog = new Map<number, {
@@ -43,6 +46,8 @@ class NebulaBackground {
       bundle: ContextBundle;
     };
     response?: WorkerAnswer;
+    plan?: WorkerPlan;
+    planExecution?: ExecutionSummary;
     latencyMs?: number;
     timestamp: number;
   }>();
@@ -308,10 +313,16 @@ class NebulaBackground {
           });
           await this.notifyPayloadUpdate(tabId);
 
-          let workerResponse;
+          const askPromise = askWorker(query, bundle);
+          const planPromise = planWorker(query, bundle).catch(error => {
+            console.warn('Failed to generate action plan', error);
+            return null;
+          });
+
+          let workerResponse: WorkerAnswer;
           const start = performance.now();
           try {
-            workerResponse = await askWorker(query, bundle);
+            workerResponse = await askPromise;
           } catch (error) {
             await chrome.tabs.sendMessage(tabId, {
               type: 'AI_RESPONSE',
@@ -322,6 +333,8 @@ class NebulaBackground {
             });
             throw error;
           }
+
+          const planResponse = await planPromise;
 
           const latencyMs = workerResponse.latencyMs ?? Math.round(performance.now() - start);
 
@@ -336,6 +349,13 @@ class NebulaBackground {
               model: workerResponse.model,
               cached: workerResponse.cached,
               latencyMs,
+              plan: planResponse?.steps ?? null,
+              planMetadata: planResponse ? {
+                model: planResponse.model,
+                source: planResponse.source,
+                cached: planResponse.cached,
+                requestId: planResponse.requestId,
+              } : null,
             },
           });
 
@@ -350,11 +370,24 @@ class NebulaBackground {
             },
           }).catch(() => {});
 
+          if (planResponse?.steps?.length) {
+            chrome.runtime.sendMessage({
+              type: 'UPDATE_STEPS',
+              payload: this.describePlanForSidebar(planResponse.steps),
+            }).catch(() => {});
+          } else {
+            chrome.runtime.sendMessage({
+              type: 'UPDATE_STEPS',
+              payload: [],
+            }).catch(() => {});
+          }
+
           const reqEntry = this.tabRequestLog.get(tabId);
           if (reqEntry) {
             reqEntry.response = workerResponse;
             reqEntry.latencyMs = latencyMs;
             reqEntry.timestamp = Date.now();
+            reqEntry.plan = planResponse ?? undefined;
             this.tabRequestLog.set(tabId, reqEntry);
             await this.notifyPayloadUpdate(tabId);
           }
@@ -405,10 +438,11 @@ class NebulaBackground {
           if (!payload.action) {
             throw new Error('No action provided for Spotlight execution');
           }
+          const action: SpotlightAction = payload.action;
           const activeTabId = sender.tab?.id ?? (await this.getActiveTabId());
 
           if (activeTabId) {
-            const policy = await this.evaluateAutomationPolicy(activeTabId, payload.action);
+            const policy = await this.evaluateAutomationPolicy(activeTabId, action);
             if (!policy.allowed) {
               await this.sendToastToTab(activeTabId, {
                 title: 'Safe mode enabled',
@@ -421,7 +455,19 @@ class NebulaBackground {
             }
           }
 
-          await this.spotlight.executeAction(payload.action);
+          switch (action.kind) {
+            case 'activate_tab':
+              await this.handleSwitchTab(action.tabId, action.windowId);
+              break;
+            case 'open_url':
+              await this.handleOpenUrl(action.url, action.active ?? true);
+              break;
+            case 'restore_session':
+              await this.handleRestoreSession(action.sessionId);
+              break;
+            default:
+              await this.spotlight.executeAction(action);
+          }
           sendResponse({ success: true });
           break;
         }
@@ -440,10 +486,16 @@ class NebulaBackground {
             break;
           }
 
-          const { previousTabId, previousWindowId } = this.lastNavigation;
+          const { previousTabId, previousWindowId, createdTabId, createdWindowId } = this.lastNavigation;
           this.lastNavigation = undefined;
 
           try {
+            if (createdTabId) {
+              await chrome.tabs.remove(createdTabId).catch(() => {});
+            }
+            if (createdWindowId && createdWindowId !== previousWindowId) {
+              await chrome.windows.remove(createdWindowId).catch(() => {});
+            }
             await chrome.tabs.update(previousTabId, { active: true });
             await chrome.windows.update(previousWindowId, { focused: true }).catch(() => {});
             await this.sendToastToTab(previousTabId, {
@@ -534,6 +586,91 @@ class NebulaBackground {
             });
             sendResponse({ success: false, error: 'Permission denied' });
           }
+          break;
+        }
+
+        case 'CLASSIFY_INTENT': {
+          const query = (payload.query ?? message.query ?? '').trim();
+          if (!query) {
+            sendResponse({ success: false, error: 'Empty query' });
+            break;
+          }
+
+          try {
+            const tabId = sender.tab?.id ?? (await this.getActiveTabId());
+            let pageData = tabId ? this.tabContexts.get(tabId) : null;
+
+            if (tabId && !pageData) {
+              try {
+                const extract = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_PAGE_DATA' });
+                if (extract?.success && extract.data) {
+                  pageData = extract.data as PageData;
+                  this.tabContexts.set(tabId, pageData);
+                }
+              } catch {
+                // ignore
+              }
+            }
+
+            const fallbackPage: PageData = {
+              title: sender.tab?.title ?? 'Untitled',
+              url: sender.tab?.url ?? '',
+              headings: [],
+              selection: undefined,
+              metadata: undefined,
+            };
+
+            const bundle = await this.contextBundler.bundle(pageData ?? fallbackPage)
+              .catch(() => ({
+                title: fallbackPage.title,
+                url: fallbackPage.url,
+                headings: [],
+                selection: fallbackPage.selection,
+                timeline: [],
+                topicTags: [],
+                timestamp: Date.now(),
+                tokenCount: 0,
+                baseTokens: 0,
+              } as ContextBundle));
+
+            const workerResponse = await askWorker(query, bundle, {
+              mode: 'intent',
+              expectedKinds: payload.expectedKinds,
+            });
+
+            const intent = workerResponse.intent;
+            if (intent && intent.kind && intent.kind !== 'unknown') {
+              const executed = await this.executeIntentAction(intent, tabId ?? undefined);
+              sendResponse({ success: executed, data: { intent } });
+            } else {
+              sendResponse({ success: false, data: { intent } });
+            }
+          } catch (error) {
+            console.error('Intent classification failed:', error);
+            sendResponse({ success: false, error: error instanceof Error ? error.message : 'Intent classification failed' });
+          }
+
+          break;
+        }
+
+        case 'PLAN_EXECUTION_RESULT': {
+          const execution: ExecutionSummary | undefined = message.payload?.summary;
+          const executionTabId = sender.tab?.id ?? (await this.getActiveTabId());
+
+          if (executionTabId && execution) {
+            const entry = this.tabRequestLog.get(executionTabId);
+            if (entry) {
+              entry.planExecution = execution;
+              this.tabRequestLog.set(executionTabId, entry);
+              chrome.runtime.sendMessage({
+                type: 'UPDATE_STEPS',
+                payload: this.describePlanForSidebar(entry.plan?.steps ?? [], execution),
+              }).catch(() => {});
+              await this.notifyPayloadUpdate(executionTabId);
+            }
+          }
+
+          sendResponse({ success: true });
           break;
         }
 
@@ -674,6 +811,12 @@ class NebulaBackground {
     switch (action.kind) {
       case 'activate_tab':
         return false;
+      case 'open_url':
+      case 'restore_session':
+      case 'browser_command':
+      case 'set_zoom':
+      case 'navigate':
+        return false;
       case 'content_message': {
         const safeMessages = new Set(['TAKE_SCREENSHOT', 'EXTRACT_PAGE_DATA', 'PING']);
         return !safeMessages.has(action.message.type);
@@ -681,6 +824,77 @@ class NebulaBackground {
       default:
         return true;
     }
+  }
+
+  private describeAutomationAction(action: AutomationAction): string {
+    const truncate = (value: string, length = 32): string => {
+      if (value.length <= length) {
+        return value;
+      }
+      return `${value.slice(0, length - 1)}…`;
+    };
+
+    switch (action.act) {
+      case 'find':
+        return action.target ? `Find “${action.target}”` : 'Find element';
+      case 'scroll': {
+        const destination = action.to ? action.to : 'center';
+        return action.target
+          ? `Scroll to “${action.target}” (${destination})`
+          : `Scroll to ${destination}`;
+      }
+      case 'focus':
+        return action.target ? `Focus “${action.target}”` : 'Focus element';
+      case 'type': {
+        const textPreview = action.text ? truncate(action.text) : 'text';
+        return action.target
+          ? `Type “${textPreview}” in “${action.target}”`
+          : `Type “${textPreview}”`;
+      }
+      case 'click': {
+        const target = action.target ? `“${action.target}”` : 'element';
+        return action.confirm ? `Confirm click on ${target}` : `Click ${target}`;
+      }
+      case 'tab':
+        return 'Press Tab';
+      case 'wait':
+        return `Wait ${action.waitMs ?? 0}ms`;
+      default:
+        return action.act;
+    }
+  }
+
+  private describePlanForSidebar(
+    steps: AutomationAction[],
+    execution?: ExecutionSummary | null,
+  ): Array<{ index: number; label: string; status: 'pending' | 'success' | 'failed'; message?: string }> {
+    if (!steps || steps.length === 0) {
+      return [];
+    }
+
+    const statusMap = new Map<number, { status: 'pending' | 'success' | 'failed'; message?: string }>();
+
+    if (execution?.steps?.length) {
+      execution.steps.forEach((stepResult, index) => {
+        let status: 'pending' | 'success' | 'failed' = 'pending';
+        if (stepResult.status === 'success') {
+          status = 'success';
+        } else if (stepResult.status === 'failed') {
+          status = 'failed';
+        }
+        statusMap.set(index, { status, message: stepResult.message });
+      });
+    }
+
+    return steps.map((step, index) => {
+      const result = statusMap.get(index);
+      return {
+        index,
+        label: this.describeAutomationAction(step),
+        status: result?.status ?? 'pending',
+        message: result?.message,
+      };
+    });
   }
 
   private async sendToastToTab(tabId: number, toast: ToastPayload): Promise<void> {
@@ -709,6 +923,8 @@ class NebulaBackground {
       request: entry.request,
       response: entry.response,
       latencyMs: entry.latencyMs,
+      plan: entry.plan,
+      planExecution: entry.planExecution,
     };
 
     chrome.runtime.sendMessage({
@@ -746,6 +962,14 @@ class NebulaBackground {
       return crypto.randomUUID();
     }
     return Math.random().toString(36).slice(2);
+  }
+
+  private scheduleUndoExpiry(undoId: string): void {
+    setTimeout(() => {
+      if (this.lastNavigation && this.lastNavigation.undoId === undoId) {
+        this.lastNavigation = undefined;
+      }
+    }, 15000);
   }
 
   private async getActiveTabId(): Promise<number | null> {
@@ -832,12 +1056,94 @@ class NebulaBackground {
       };
 
       await this.promptUndoNavigation(tabId, undoId);
-      setTimeout(() => {
-        if (this.lastNavigation && this.lastNavigation.undoId === undoId) {
-          this.lastNavigation = undefined;
-        }
-      }, 15000);
+      this.scheduleUndoExpiry(undoId);
     }
+  }
+
+  private async handleOpenUrl(url: string, active: boolean): Promise<chrome.tabs.Tab | null> {
+    let previousTab: chrome.tabs.Tab | undefined;
+
+    if (active) {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        previousTab = tabs[0];
+      } catch (error) {
+        console.warn('Unable to determine previous tab before opening URL', error);
+      }
+    }
+
+    const newTab = await chrome.tabs.create({ url, active });
+
+    if (newTab?.id) {
+      await this.spotlight.updateTabIndex(newTab);
+    }
+
+    if (active && previousTab?.id && previousTab.windowId !== undefined && newTab?.id && previousTab.id !== newTab.id) {
+      const undoId = this.generateUndoId();
+      this.lastNavigation = {
+        previousTabId: previousTab.id,
+        previousWindowId: previousTab.windowId,
+        undoId,
+        createdAt: Date.now(),
+        createdTabId: newTab.id,
+        createdWindowId: newTab.windowId,
+      };
+
+      await this.promptUndoNavigation(newTab.id, undoId);
+      this.scheduleUndoExpiry(undoId);
+    }
+
+    return newTab ?? null;
+  }
+
+  private async handleRestoreSession(sessionId: string): Promise<chrome.tabs.Tab | null> {
+    let previousTab: chrome.tabs.Tab | undefined;
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      previousTab = tabs[0];
+    } catch (error) {
+      console.warn('Unable to determine previous tab before restoring session', error);
+    }
+
+    const restored = await chrome.sessions.restore(sessionId);
+    let restoredTab = restored?.tab ?? restored?.window?.tabs?.[0] ?? null;
+    if (restoredTab?.id === undefined && restored?.tab?.id !== undefined) {
+      restoredTab = restored.tab;
+    }
+    const targetTabId = restoredTab?.id ?? null;
+    const targetWindowId = restoredTab?.windowId ?? restored?.window?.id;
+
+    if (targetTabId) {
+      await chrome.tabs.update(targetTabId, { active: true });
+      try {
+        const tabDetails = await chrome.tabs.get(targetTabId);
+        await this.spotlight.updateTabIndex(tabDetails);
+        restoredTab = tabDetails;
+      } catch (error) {
+        console.warn('Unable to update restored tab index', error);
+      }
+    }
+
+    if (targetWindowId !== undefined) {
+      await chrome.windows.update(targetWindowId, { focused: true }).catch(() => {});
+    }
+
+    if (previousTab?.id && targetTabId && previousTab.id !== targetTabId && previousTab.windowId !== undefined) {
+      const undoId = this.generateUndoId();
+      this.lastNavigation = {
+        previousTabId: previousTab.id,
+        previousWindowId: previousTab.windowId,
+        undoId,
+        createdAt: Date.now(),
+        createdTabId: targetTabId,
+        createdWindowId: targetWindowId,
+      };
+
+      await this.promptUndoNavigation(targetTabId, undoId);
+      this.scheduleUndoExpiry(undoId);
+    }
+
+    return restoredTab ?? null;
   }
 
   private async handleReopenTab(query: string): Promise<chrome.tabs.Tab | null> {
@@ -847,8 +1153,7 @@ class NebulaBackground {
 
       for (const session of recentlyClosed) {
         if (session.tab && this.matchesQuery(session.tab.title || session.tab.url || '', query)) {
-          const restored = await chrome.sessions.restore(session.tab.sessionId);
-          return restored.tab || null;
+          return await this.handleRestoreSession(session.tab.sessionId!);
         }
       }
     } catch (error) {
@@ -864,14 +1169,132 @@ class NebulaBackground {
       });
 
       if (historyItems.length > 0) {
-        const tab = await chrome.tabs.create({ url: historyItems[0].url });
-        return tab;
+        return await this.handleOpenUrl(historyItems[0].url ?? '', true);
       }
     } catch (error) {
       console.error('Error searching history:', error);
     }
 
     return null;
+  }
+
+  private async executeIntentAction(intent: WorkerIntent, senderTabId?: number): Promise<boolean> {
+    if (!intent || typeof intent.kind !== 'string') {
+      return false;
+    }
+
+    const kind = intent.kind.toLowerCase();
+    const payload = intent.payload ?? {};
+
+    switch (kind) {
+      case 'open_url': {
+        const url = typeof payload?.url === 'string' ? payload.url : '';
+        if (!url) {
+          return false;
+        }
+        const active = payload?.active === false ? false : true;
+        await this.handleOpenUrl(url, active);
+        return true;
+      }
+
+      case 'navigate': {
+        const direction = typeof payload?.direction === 'string' ? payload.direction : 'reload';
+        await this.spotlight.executeAction({
+          kind: 'navigate',
+          direction: direction as 'back' | 'forward' | 'reload',
+        });
+        return true;
+      }
+
+      case 'browser_command': {
+        const command = typeof payload?.command === 'string' ? payload.command : '';
+        if (!command) {
+          return false;
+        }
+        await this.spotlight.executeAction({
+          kind: 'browser_command',
+          command: command as 'new_tab' | 'close_tab' | 'reload',
+        });
+        return true;
+      }
+
+      case 'set_zoom': {
+        const value = Number(payload?.value);
+        if (!Number.isFinite(value) || value <= 0) {
+          return false;
+        }
+        await this.spotlight.executeAction({
+          kind: 'set_zoom',
+          value,
+        });
+        return true;
+      }
+
+      case 'screenshot': {
+        const mode = typeof payload?.mode === 'string' && payload.mode.includes('full') ? 'full' : 'visible';
+        await this.spotlight.executeAction({
+          kind: 'content_message',
+          message: { type: 'TAKE_SCREENSHOT', payload: { mode } },
+        });
+        return true;
+      }
+
+      case 'search_history': {
+        const query = typeof payload?.query === 'string' && payload.query.trim().length > 0
+          ? payload.query.trim()
+          : '';
+        const url = query
+          ? `chrome://history/?q=${encodeURIComponent(query)}`
+          : 'chrome://history';
+        await this.handleOpenUrl(url, true);
+        return true;
+      }
+
+      case 'switch_tab': {
+        const tabQuery = typeof payload?.tabQuery === 'string' && payload.tabQuery.trim().length > 0
+          ? payload.tabQuery.trim()
+          : (typeof intent.tabQuery === 'string' ? intent.tabQuery.trim() : '');
+
+        if (!tabQuery) {
+          return false;
+        }
+
+        const switched = await this.executeSwitchTabIntent(tabQuery);
+        if (!switched) {
+          await this.sendToastToTab(senderTabId ?? -1, {
+            title: 'Tab not found',
+            message: `Couldn't find a tab matching “${tabQuery}”.`,
+            variant: 'info',
+            timeoutMs: 4000,
+          });
+        }
+        return switched;
+      }
+
+      default:
+        return false;
+    }
+  }
+
+  private async executeSwitchTabIntent(tabQuery: string): Promise<boolean> {
+    const query = tabQuery.trim();
+    if (!query) {
+      return false;
+    }
+
+    try {
+      const results = await this.spotlight.search(query);
+      const tabResult = results.find(result => result.type === 'tab' && result.action.kind === 'activate_tab');
+
+      if (tabResult && tabResult.action.kind === 'activate_tab') {
+        await this.handleSwitchTab(tabResult.action.tabId, tabResult.action.windowId);
+        return true;
+      }
+    } catch (error) {
+      console.error('Failed to execute switch_tab intent', error);
+    }
+
+    return false;
   }
 
   private matchesQuery(text: string, query: string): boolean {

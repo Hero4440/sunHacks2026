@@ -57,7 +57,50 @@ These are small but critical polish items judges expect.
   - Friendly toasts for: chrome:// injection blocked, screenshot blocked, low resolver confidence ("tap element"), denied permissions
 
 - **Undo Navigation**
-  - After Spotlight switch/open, show one‑click "Back to where I was" (tab + scroll)
+  - After Spotlight switch/open, show one-click "Back to where I was" (tab + scroll)
+
+---
+
+### Phase 2.5: Remaining Feature Gaps (post-MVP polish)
+
+- **Planner Execution Loop**
+  - Trigger `/api/plan` after successful Q&A when the user wants automation
+  - Surface returned steps in the sidebar with a **Start Assist** button
+  - Pipe plans to the content script using `EXECUTE_ACTION_PLAN` and track per-step status
+
+- **Summaries & Context Pre-Warm**
+  - Call `/api/summarize` for active tabs and Spotlight switches
+  - Store TL;DRs in `NebulaStorage` and render them in the timeline/Answers panel
+  - Prefetch summaries during tab switches to meet the <800 ms readiness target
+
+- **Privacy Inspector**
+  - Build the "What Was Sent" view backed by `NebulaStorage` logs
+  - Show payload hashes, token counts, cache/fallback badges, and Forget All actions
+
+- **Proactive Chip & Health Badges**
+  - Implement the high-confidence suggestion chip with Safe Mode and per-site caps
+  - Add badges/toasts for offline mode, cache hits, fallback model, and permission denials
+
+- **Token Budget Enforcement**
+  - Enforce `tokenCapPerDay` and `cacheTTL` settings inside the worker/background
+  - Display usage meter and friendly warnings as limits approach
+
+- **Screenshot Enhancements**
+  - Add stitched full-page capture and optional redaction tools before export
+  - Provide copy-to-clipboard/download flows with filenames per spec
+
+- **Snowflake Telemetry (Opt-In)**
+  - Capture hashed usage events when the user opts in and surface topic cards locally
+
+- **Accessibility & UX Polish**
+  - Ensure high-contrast/reduced-motion toggles, ARIA roles, focus traps, and keyboard-only flows across palette/sidebar
+
+- **Landing Page Alignment**
+  - Replace the boilerplate Next.js marketing site with Nebula-specific copy, privacy policy, and install instructions
+
+- **Testing & Automation**
+  - Add unit/integration tests for resolver, bundler, worker endpoints, and action execution
+  - Set up lint/test scripts (CI optional) to guard future changes
 
 ---
 

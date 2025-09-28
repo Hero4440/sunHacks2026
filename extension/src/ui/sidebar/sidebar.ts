@@ -351,6 +351,45 @@ function updateAnswersPanel(data: any): void {
   `
 }
 
+function describeAction(step: any): string {
+  if (!step) return ''
+  const act = step.act || step.action?.act
+  const target = step.target || step.action?.target
+  const to = step.to || step.action?.to
+  const text = step.text || step.action?.text
+  const confirm = step.confirm || step.action?.confirm
+  const waitMs = step.waitMs || step.action?.waitMs
+
+  const truncate = (value: string, length = 32) => (
+    value.length <= length ? value : `${value.slice(0, length - 1)}…`
+  )
+
+  switch (act) {
+    case 'find':
+      return target ? `Find “${target}”` : 'Find element'
+    case 'scroll': {
+      const destination = to ?? 'center'
+      return target ? `Scroll to “${target}” (${destination})` : `Scroll to ${destination}`
+    }
+    case 'focus':
+      return target ? `Focus “${target}”` : 'Focus element'
+    case 'type': {
+      const preview = text ? truncate(text) : 'text'
+      return target ? `Type “${preview}” in “${target}”` : `Type “${preview}”`
+    }
+    case 'click': {
+      const label = target ? `“${target}”` : 'element'
+      return confirm ? `Confirm click on ${label}` : `Click ${label}`
+    }
+    case 'tab':
+      return 'Press Tab'
+    case 'wait':
+      return `Wait ${waitMs ?? 0}ms`
+    default:
+      return act || 'Step'
+  }
+}
+
 function updateStepsPanel(steps: any[]): void {
   const panel = document.getElementById('steps-panel')
   if (!panel) return
@@ -367,14 +406,25 @@ function updateStepsPanel(steps: any[]): void {
     return
   }
 
-  const stepsHtml = steps.map((step, index) => {
-    const statusClass = step.completed ? 'completed' : step.failed ? 'failed' : ''
-    const icon = step.completed ? '✓' : step.failed ? '✗' : (index + 1).toString()
+  const stepsHtml = steps.map((step: any, index: number) => {
+    const status: string = step.status
+      ? String(step.status)
+      : step.completed
+        ? 'success'
+        : step.failed
+          ? 'failed'
+          : 'pending'
+
+    const statusClass = status === 'success' ? 'completed' : status === 'failed' ? 'failed' : ''
+    const icon = status === 'success' ? '✓' : status === 'failed' ? '✗' : (index + 1).toString()
+    const label = step.label || describeAction(step.action ?? step)
+    const detail = step.message ? `<div class="action-detail">${escapeHtml(step.message)}</div>` : ''
 
     return `
       <div class="action-item ${statusClass}">
         <span class="action-icon">${icon}</span>
-        <span>${step.description || step.act}</span>
+        <span>${escapeHtml(label)}</span>
+        ${detail}
       </div>
     `
   }).join('')
@@ -504,6 +554,8 @@ function updateSentPanel(): void {
   }
 
   const { request, response, latencyMs, timestamp } = lastPayload
+  const plan = lastPayload.plan
+  const planExecution = lastPayload.planExecution
   const bundle = request?.bundle || {}
   const tokens = response?.tokens || {}
   const timestampStr = timestamp ? new Date(timestamp).toLocaleTimeString() : 'now'
@@ -518,6 +570,33 @@ function updateSentPanel(): void {
 
   const payloadPreview = response?.payloadPreview
     ? `<pre class="sent-json">${escapeHtml(JSON.stringify(response.payloadPreview, null, 2))}</pre>`
+    : ''
+
+  const planList = Array.isArray(plan?.steps)
+    ? plan.steps.map((step: any, index: number) => {
+        const executionStep = planExecution?.steps?.[index]
+        const status = executionStep?.status ?? 'pending'
+        const badge = status === 'success' ? '✓' : status === 'failed' ? '✗' : String(index + 1)
+        const message = executionStep?.message ? `<div class="sent-plan-note">${escapeHtml(executionStep.message)}</div>` : ''
+        return `
+          <li class="sent-plan-item sent-plan-${status}">
+            <span class="sent-plan-badge">${badge}</span>
+            <span>${escapeHtml(describeAction(step))}</span>
+            ${message}
+          </li>
+        `
+      }).join('')
+    : ''
+
+  const planMetaParts: string[] = []
+  if (plan?.model) planMetaParts.push(`Model: ${plan.model}`)
+  if (plan?.source) planMetaParts.push(`Source: ${plan.source}`)
+  if (plan?.cached) planMetaParts.push('Cached')
+  if (plan?.requestId) planMetaParts.push(`Request: ${plan.requestId}`)
+  if (planExecution?.durationMs !== undefined) planMetaParts.push(`Duration: ${Math.round(planExecution.durationMs)}ms`)
+
+  const planMeta = planMetaParts.length
+    ? `<div class="sent-plan-meta">${planMetaParts.map(part => `<span>${escapeHtml(part)}</span>`).join(' • ')}</div>`
     : ''
 
   panel.innerHTML = `
@@ -553,6 +632,13 @@ function updateSentPanel(): void {
         </div>
       ` : ''}
     </div>
+    ${planList ? `
+      <div class="sent-section">
+        <div class="sent-label">Action Plan</div>
+        <ul class="sent-plan-list">${planList}</ul>
+        ${planMeta}
+      </div>
+    ` : ''}
   `
 }
 

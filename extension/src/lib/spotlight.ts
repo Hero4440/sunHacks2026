@@ -20,6 +20,7 @@ export interface SpotlightResult {
   icon?: string
   badge?: string
   action: SpotlightAction
+  fallback?: boolean
 }
 
 export interface TabInfo {
@@ -44,7 +45,8 @@ export class SpotlightEngine {
   }
 
   async search(query: string): Promise<SpotlightResult[]> {
-    const normalizedQuery = query.toLowerCase().trim()
+    const rawQuery = query
+    const normalizedQuery = rawQuery.toLowerCase().trim()
 
     if (!normalizedQuery) {
       return []
@@ -87,6 +89,13 @@ export class SpotlightEngine {
       results.push(...await this.searchSessions(normalizedQuery))
       results.push(...this.searchSettings(normalizedQuery))
       results.push(...this.searchCommands(normalizedQuery))
+    }
+
+    if (results.length === 0) {
+      const fallback = this.createOpenUrlFallback(rawQuery)
+      if (fallback) {
+        results.push(fallback)
+      }
     }
 
     return results
@@ -524,6 +533,69 @@ export class SpotlightEngine {
         kind: 'navigate',
         direction: action as 'back' | 'forward' | 'reload'
       }
+    }
+  }
+
+  private createOpenUrlFallback(rawQuery: string): SpotlightResult | null {
+    const trimmed = rawQuery.trim()
+    if (!trimmed) {
+      return null
+    }
+
+    const directUrlRegex = /^https?:\/\//i
+    const openCommandRegex = /^(?:open|go to|visit)\s+(.+)$/i
+    const domainRegex = /^([a-z0-9-]+\.)+[a-z]{2,}(\/.*)?$/i
+    const simpleTokenRegex = /^[a-z0-9-]+$/i
+
+    let target = trimmed
+
+    const openMatch = trimmed.match(openCommandRegex)
+    if (openMatch) {
+      target = openMatch[1].trim()
+    }
+
+    target = target.replace(/["'<>]/g, '').trim()
+    if (!target) {
+      return null
+    }
+
+    const hasOpenCommand = /^(?:open|go to|visit)\s+/i.test(rawQuery)
+
+    let url = ''
+    let description = ''
+
+    if (directUrlRegex.test(target)) {
+      url = target
+      description = 'Open exact URL'
+    } else if (directUrlRegex.test(trimmed)) {
+      url = trimmed
+      description = 'Open exact URL'
+    } else if (domainRegex.test(target)) {
+      url = target.startsWith('http') ? target : `https://${target}`
+      description = `Open ${url}`
+    } else if (hasOpenCommand && simpleTokenRegex.test(target)) {
+      url = `https://www.${target}.com`
+      description = `Open ${url}`
+    } else if (hasOpenCommand) {
+      url = `https://www.google.com/search?q=${encodeURIComponent(target)}`
+      description = `Search the web for “${target}”`
+    } else {
+      return null
+    }
+
+    return {
+      id: `open-url-${url}`,
+      type: 'command',
+      title: `Open ${url}`,
+      description,
+      score: 0.95,
+      badge: 'Action',
+      fallback: true,
+      action: {
+        kind: 'open_url',
+        url,
+        active: true,
+      },
     }
   }
 
