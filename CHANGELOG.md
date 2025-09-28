@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/Hero4440/sunHacks2026/compare/v1.0.0...v1.0.1) (2025-09-28)
+
+
+### Bug Fixes
+
+* resolve service worker communication and TypeScript compilation errors ([d5f941e](https://github.com/Hero4440/sunHacks2026/commit/d5f941eb680f1c5995e40b69e86ad53ffeaa8002))
+
 # 1.0.0 (2025-09-27)
 
 
