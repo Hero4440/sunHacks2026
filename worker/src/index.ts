@@ -1,34 +1,33 @@
+import type { Ai, AiModels } from '@cloudflare/workers-types';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 
-import type { Ai, AiModels } from '@cloudflare/workers-types';
-
 import type { AutomationAction, AutomationPlan } from '../../shared/automation';
 
 // Bindings expected in Wrangler
-interface EnvBindings {
+type EnvBindings = {
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
   ALLOWED_ORIGINS?: string;
   SUMMARIES_KV?: KVNamespace;
   WORKERS_AI_MODEL?: string;
   AI?: Ai;
-}
+};
 
 type AllowedOriginsCache = string[];
 
 type LLMSource = 'gemini' | 'workers-ai' | 'stub';
 
-interface ResponseMeta {
+type ResponseMeta = {
   model_used: string;
   source: LLMSource;
   tokens_in: number;
   tokens_out: number;
   cached: boolean;
-}
+};
 
 type ActionStep = AutomationAction;
 
@@ -37,17 +36,17 @@ type PlanResult = ResponseMeta & { steps: AutomationPlan };
 type SummarizeResult = ResponseMeta & { summary: string };
 
 const contextSchema = z.object({
-  url: z.string().url().optional(),
+  url: z.string().optional(),
   title: z.string().min(1).optional(),
   selection: z.string().optional(),
   headings: z.array(z.string()).max(5).optional(),
   timeline: z
     .array(
       z.object({
-        url: z.string().url(),
+        url: z.string(),
         title: z.string(),
         tldr: z.string().optional(),
-        ts: z.number().int(),
+        timestamp: z.number().int().optional(),
       }),
     )
     .max(5)
@@ -74,16 +73,27 @@ const app = new Hono<{ Bindings: EnvBindings; Variables: { allowedOrigins?: Allo
 
 let allowedOriginsCache: AllowedOriginsCache | undefined;
 
-app.use('*', async (c, next) => {
+const isOriginAllowed = (origin: string | null, allowed: string[]): boolean => {
+  if (!origin) {
+    return allowed.includes('*') || allowed.includes('chrome-extension://*');
+  }
+  if (allowed.includes(origin)) {
+    return true;
+  }
+  if (allowed.includes('chrome-extension://*') && origin.startsWith('chrome-extension://')) {
+    return true;
+  }
+  return false;
+};
+
+app.use('*', (c, next) => {
   if (!allowedOriginsCache) {
     allowedOriginsCache = parseAllowedOrigins(c.env.ALLOWED_ORIGINS);
   }
   c.set('allowedOrigins', allowedOriginsCache ?? []);
 
   if (c.req.method !== 'OPTIONS') {
-    const origin = c.req.header('origin');
-    const allowedOrigins = c.get('allowedOrigins') ?? [];
-    if (allowedOrigins.length > 0 && origin && !allowedOrigins.includes(origin)) {
+    if (!isOriginAllowed(c.req.header('origin'), c.get('allowedOrigins'))) {
       throw new HTTPException(403, { message: 'Origin not allowed' });
     }
   }
@@ -91,16 +101,20 @@ app.use('*', async (c, next) => {
   return next();
 });
 
-app.use('*', cors({
-  origin: (origin) => {
-    const allowed = allowedOriginsCache;
-    if (!allowed || allowed.length === 0) {
-      return origin;
-    }
-    return allowed.includes(origin ?? '') ? origin : '';
-  },
-  allowMethods: ['POST', 'OPTIONS'],
-}));
+app.use(
+  '*',
+  cors({
+    origin: (origin, c) => {
+      if (!isOriginAllowed(origin, c.get('allowedOrigins'))) {
+        return '';
+      }
+      return origin ?? '*';
+    },
+    allowMethods: ['POST', 'OPTIONS'],
+    allowHeaders: ['Content-Type'],
+    maxAge: 86400,
+  }),
+);
 
 app.post('/api/ask', async (c) => {
   const reqId = nanoid();
@@ -182,7 +196,7 @@ async function executeAsk(env: EnvBindings, request: z.infer<typeof askSchema>) 
     prompt,
     temperature: 0.3,
     defaultValue: fallback.answer,
-    extract: (resp) => extractText(resp),
+    extract: resp => extractText(resp),
   });
 
   if (llm) {
@@ -197,7 +211,7 @@ async function executeAsk(env: EnvBindings, request: z.infer<typeof askSchema>) 
     prompt,
     temperature: 0.3,
     defaultValue: fallback.answer,
-    extract: (resp) => extractWorkersText(resp),
+    extract: resp => extractWorkersText(resp),
   });
 
   if (workers) {
@@ -251,7 +265,7 @@ async function executePlan(env: EnvBindings, request: z.infer<typeof planSchema>
       },
     },
     defaultValue: fallbackSteps,
-    extract: (resp) => extractJson<ActionStep[]>(resp),
+    extract: resp => extractJson<ActionStep[]>(resp),
   });
 
   if (llm) {
@@ -266,7 +280,7 @@ async function executePlan(env: EnvBindings, request: z.infer<typeof planSchema>
     prompt,
     temperature: 0.1,
     defaultValue: fallbackSteps,
-    extract: (resp) => extractWorkersJson<AutomationPlan>(resp),
+    extract: resp => extractWorkersJson<AutomationPlan>(resp),
   });
 
   if (workers) {
@@ -314,14 +328,14 @@ async function executeSummarize(env: EnvBindings, request: z.infer<typeof summar
     prompt,
     temperature: 0.2,
     defaultValue: fallback.summary,
-    extract: (resp) => extractText(resp),
+    extract: resp => extractText(resp),
   });
 
   if (llm) {
     if (env.SUMMARIES_KV) {
       env.SUMMARIES_KV.put(request.url, JSON.stringify({ summary: llm.data }), {
         expirationTtl: 300,
-      }).catch((err) => console.warn('KV put failed', err));
+      }).catch(err => console.warn('KV put failed', err));
     }
 
     return {
@@ -335,14 +349,14 @@ async function executeSummarize(env: EnvBindings, request: z.infer<typeof summar
     prompt,
     temperature: 0.2,
     defaultValue: fallback.summary,
-    extract: (resp) => extractWorkersText(resp),
+    extract: resp => extractWorkersText(resp),
   });
 
   if (workers) {
     if (env.SUMMARIES_KV) {
       env.SUMMARIES_KV.put(request.url, JSON.stringify({ summary: workers.data }), {
         expirationTtl: 300,
-      }).catch((err) => console.warn('KV put failed', err));
+      }).catch(err => console.warn('KV put failed', err));
     }
 
     return {
@@ -380,9 +394,11 @@ function applyRedaction<T extends { context?: Record<string, unknown> }>(payload
 
   const clone = structuredClone(payload);
   const redact = (value: unknown): unknown => {
-    if (typeof value !== 'string') return value;
+    if (typeof value !== 'string') {
+      return value;
+    }
 
-    const emailMask = value.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]');
+    const emailMask = value.replace(/[\w.%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]');
     const phoneMask = emailMask.replace(/\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/g, '[phone]');
     const ssnMask = phoneMask.replace(/\b\d{3}-\d{2}-\d{4}\b/g, '[ssn]');
     return ssnMask;
@@ -395,7 +411,9 @@ function applyRedaction<T extends { context?: Record<string, unknown> }>(payload
       }
       if (Array.isArray(value)) {
         (clone.context as Record<string, unknown>)[key] = value.map((entry) => {
-          if (typeof entry === 'string') return redact(entry);
+          if (typeof entry === 'string') {
+            return redact(entry);
+          }
           if (typeof entry === 'object' && entry !== null) {
             const nested: Record<string, unknown> = {};
             for (const [nestedKey, nestedValue] of Object.entries(entry)) {
@@ -413,10 +431,13 @@ function applyRedaction<T extends { context?: Record<string, unknown> }>(payload
 }
 
 function parseAllowedOrigins(rawOrigins?: string): AllowedOriginsCache {
-  return rawOrigins
+  const defaults = ['chrome-extension://*'];
+  const parsed = rawOrigins
     ?.split(',')
-    .map((item) => item.trim())
+    .map(item => item.trim())
     .filter(Boolean) ?? [];
+
+  return Array.from(new Set([...defaults, ...parsed]));
 }
 
 function buildAskPrompt(request: z.infer<typeof askSchema>) {
@@ -427,16 +448,22 @@ function buildAskPrompt(request: z.infer<typeof askSchema>) {
 
   if (request.context) {
     const { title, url, selection, headings, timeline } = request.context;
-    if (title) lines.push(`Page title: ${title}`);
-    if (url) lines.push(`Page URL: ${url}`);
+    if (title) {
+      lines.push(`Page title: ${title}`);
+    }
+    if (url) {
+      lines.push(`Page URL: ${url}`);
+    }
     if (headings && headings.length) {
       lines.push('Headings:');
-      headings.forEach((h) => lines.push(`- ${h}`));
+      headings.forEach(h => lines.push(`- ${h}`));
     }
-    if (selection) lines.push(`Selection: ${selection}`);
+    if (selection) {
+      lines.push(`Selection: ${selection}`);
+    }
     if (timeline && timeline.length) {
       lines.push('Recent timeline:');
-      timeline.forEach((item) => lines.push(`- ${item.title} (${item.url})`));
+      timeline.forEach(item => lines.push(`- ${item.title} (${item.url})`));
     }
   }
 
@@ -454,13 +481,19 @@ function buildPlanPrompt(request: z.infer<typeof planSchema>) {
 
   if (request.context) {
     const { title, url, selection, headings } = request.context;
-    if (title) lines.push(`Page title: ${title}`);
-    if (url) lines.push(`Page URL: ${url}`);
+    if (title) {
+      lines.push(`Page title: ${title}`);
+    }
+    if (url) {
+      lines.push(`Page URL: ${url}`);
+    }
     if (headings?.length) {
       lines.push('Visible headings:');
-      headings.forEach((h) => lines.push(`- ${h}`));
+      headings.forEach(h => lines.push(`- ${h}`));
     }
-    if (selection) lines.push(`User selection: ${selection}`);
+    if (selection) {
+      lines.push(`User selection: ${selection}`);
+    }
   }
 
   lines.push('Output JSON only, no comments.');
@@ -475,19 +508,23 @@ function buildSummarizePrompt(request: z.infer<typeof summarizeSchema>) {
 
   if (request.context) {
     const { title, headings, selection } = request.context;
-    if (title) lines.push(`Title: ${title}`);
+    if (title) {
+      lines.push(`Title: ${title}`);
+    }
     if (headings?.length) {
       lines.push('Headings:');
-      headings.forEach((h) => lines.push(`- ${h}`));
+      headings.forEach(h => lines.push(`- ${h}`));
     }
-    if (selection) lines.push(`Highlighted content: ${selection}`);
+    if (selection) {
+      lines.push(`Highlighted content: ${selection}`);
+    }
   }
 
   lines.push('Output format: Markdown bullet list, max 60 words total.');
   return lines.join('\n');
 }
 
-interface GeminiCallOptions<T> {
+type GeminiCallOptions<T> = {
   label: 'ask' | 'plan' | 'summarize';
   prompt: string;
   temperature?: number;
@@ -495,9 +532,9 @@ interface GeminiCallOptions<T> {
   responseSchema?: unknown;
   defaultValue: T;
   extract: (response: GeminiContentResponse) => T | undefined;
-}
+};
 
-interface GeminiContentResponse {
+type GeminiContentResponse = {
   modelVersion?: string;
   candidates?: Array<{
     content?: {
@@ -512,7 +549,7 @@ interface GeminiContentResponse {
     candidatesTokenCount?: number;
     totalTokenCount?: number;
   };
-}
+};
 
 async function callGemini<T>(env: EnvBindings, options: GeminiCallOptions<T>) {
   if (!env.GEMINI_API_KEY) {
@@ -574,7 +611,7 @@ async function callGemini<T>(env: EnvBindings, options: GeminiCallOptions<T>) {
 
 function extractText(response: GeminiContentResponse) {
   const text = response.candidates
-    ?.flatMap((candidate) => candidate.content?.parts?.map((part) => part.text ?? '') ?? [])
+    ?.flatMap(candidate => candidate.content?.parts?.map(part => part.text ?? '') ?? [])
     .join('\n')
     .trim();
   return text && text.length > 0 ? text : undefined;
@@ -582,7 +619,9 @@ function extractText(response: GeminiContentResponse) {
 
 function extractJson<T>(response: GeminiContentResponse) {
   const text = extractText(response);
-  if (!text) return undefined;
+  if (!text) {
+    return undefined;
+  }
 
   try {
     return JSON.parse(text) as T;
@@ -592,13 +631,13 @@ function extractJson<T>(response: GeminiContentResponse) {
   }
 }
 
-interface WorkersAICallOptions<T> {
+type WorkersAICallOptions<T> = {
   label: 'ask' | 'plan' | 'summarize';
   prompt: string;
   temperature?: number;
   defaultValue: T;
   extract: (response: WorkersAIResponse) => T | undefined;
-}
+};
 
 type WorkersAIResponse = string | {
   response?: string;
@@ -655,14 +694,16 @@ function extractWorkersText(response: WorkersAIResponse) {
     ?? response.result
     ?? response.text
     ?? response.output_text
-    ?? response.outputs?.map((item) => item.text ?? '').join('\n');
+    ?? response.outputs?.map(item => item.text ?? '').join('\n');
 
   return text && text.trim().length > 0 ? text.trim() : undefined;
 }
 
 function extractWorkersJson<T>(response: WorkersAIResponse) {
   const text = extractWorkersText(response);
-  if (!text) return undefined;
+  if (!text) {
+    return undefined;
+  }
 
   try {
     return JSON.parse(text) as T;

@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nebula Sidebar</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      background: #ffffff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-size: 14px;
+      color: #374151;
+    }
+
+    .sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid #e5e7eb;
+      background: #f9fafb;
+    }
+
+    .sidebar-title {
+      font-weight: 600;
+      font-size: 16px;
+      color: #111827;
+      margin-bottom: 8px;
+    }
+
+    .sidebar-subtitle {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid #e5e7eb;
+      background: white;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 12px 8px;
+      text-align: center;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      font-size: 12px;
+      font-weight: 500;
+      color: #6b7280;
+      transition: all 0.2s ease;
+    }
+
+    .tab.active {
+      color: #4f46e5;
+      border-bottom-color: #4f46e5;
+    }
+
+    .tab:hover {
+      background: #f9fafb;
+    }
+
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    .answer-section {
+      margin-bottom: 20px;
+    }
+
+    .answer-title {
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #111827;
+    }
+
+    .answer-content {
+      background: #f9fafb;
+      padding: 12px;
+      border-radius: 6px;
+      border-left: 3px solid #4f46e5;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      color: #6b7280;
+    }
+
+    .loading-spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid #e5e7eb;
+      border-top: 2px solid #4f46e5;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: #6b7280;
+    }
+
+    .empty-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 12px;
+      opacity: 0.5;
+    }
+
+    .action-plan {
+      margin-bottom: 20px;
+    }
+
+    .action-item {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      margin-bottom: 4px;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    .action-item.completed {
+      background: #f0fdf4;
+      border-color: #10b981;
+    }
+
+    .action-item.failed {
+      background: #fef2f2;
+      border-color: #ef4444;
+    }
+
+    .action-icon {
+      width: 16px;
+      height: 16px;
+      margin-right: 8px;
+      opacity: 0.7;
+    }
+
+    .settings-group {
+      margin-bottom: 20px;
+    }
+
+    .settings-label {
+      font-weight: 500;
+      margin-bottom: 8px;
+      color: #111827;
+    }
+
+    .settings-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }
+
+    .settings-input {
+      width: 90px;
+      padding: 6px 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #111827;
+      background: white;
+      transition: border 0.2s ease;
+    }
+
+    .settings-input:focus {
+      outline: none;
+      border-color: #4f46e5;
+      box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.12);
+    }
+
+    .settings-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .toggle {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      background: #e5e7eb;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    .toggle.active {
+      background: #4f46e5;
+    }
+
+    .toggle-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s ease;
+    }
+
+    .toggle.active .toggle-thumb {
+      transform: translateX(20px);
+    }
+
+    .button {
+      background: #4f46e5;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: background 0.2s ease;
+    }
+
+    .button:hover {
+      background: #4338ca;
+    }
+
+    .button.secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .button.secondary:hover {
+      background: #e5e7eb;
+    }
+
+    .sent-content {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .sent-section {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .sent-label {
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #4f46e5;
+      margin-bottom: 8px;
+    }
+
+    .sent-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .sent-pill {
+      background: #eef2ff;
+      color: #4338ca;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .sent-list {
+      padding-left: 16px;
+      margin: 8px 0;
+    }
+
+    .sent-json {
+      font-family: ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+      font-size: 12px;
+      background: #111827;
+      color: #e0e7ff;
+      padding: 10px 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar-header">
+    <div class="sidebar-title">Nebula AI Copilot</div>
+    <div class="sidebar-subtitle">AI-powered browser assistant</div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="answers">Answers</div>
+    <div class="tab" data-tab="steps">Steps</div>
+    <div class="tab" data-tab="spotlight">Search</div>
+    <div class="tab" data-tab="sent">What Was Sent</div>
+    <div class="tab" data-tab="settings">Settings</div>
+  </div>
+
+  <div class="content">
+    <!-- Answers Tab -->
+    <div class="tab-panel active" id="answers-panel">
+      <div class="empty-state">
+        <svg class="empty-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <p>Ask me anything about this page!</p>
+      </div>
+    </div>
+
+    <!-- Steps Tab -->
+    <div class="tab-panel" id="steps-panel">
+      <div class="empty-state">
+        <svg class="empty-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v6a2 2 0 002 2h6a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+        </svg>
+        <p>No action plan yet. Try asking me to help with a task!</p>
+      </div>
+    </div>
+
+    <!-- Spotlight Tab -->
+    <div class="tab-panel" id="spotlight-panel">
+      <div class="empty-state">
+        <svg class="empty-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+        </svg>
+        <p>Use the command palette to search tabs, history, and settings</p>
+      </div>
+    </div>
+
+    <!-- What Was Sent Tab -->
+    <div class="tab-panel" id="sent-panel">
+      <div class="sent-content" id="sent-panel-content">
+        <div class="empty-state">
+          <svg class="empty-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+          </svg>
+          <p>No requests yet. Ask Nebula something to view the payload.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Tab -->
+    <div class="tab-panel" id="settings-panel">
+      <div class="settings-group">
+        <div class="settings-label">Privacy & Safety</div>
+        <div class="settings-item">
+          <span>Safe Mode</span>
+          <div class="toggle" id="safe-mode-toggle">
+            <div class="toggle-thumb"></div>
+          </div>
+        </div>
+        <div class="settings-item">
+          <span>Allow on this site</span>
+          <div class="toggle" id="site-allow-toggle">
+            <div class="toggle-thumb"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-label">Features</div>
+        <div class="settings-item">
+          <span>Proactive suggestions</span>
+          <div class="toggle active" id="proactive-toggle">
+            <div class="toggle-thumb"></div>
+          </div>
+        </div>
+        <div class="settings-item">
+          <span>Screenshot redaction</span>
+          <div class="toggle active" id="redaction-toggle">
+            <div class="toggle-thumb"></div>
+          </div>
+        </div>
+        <div class="settings-item">
+          <span>History recall</span>
+          <div class="toggle" id="recall-toggle">
+            <div class="toggle-thumb"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-label">Usage Limits</div>
+        <div class="settings-item">
+          <span>Daily token cap</span>
+          <input type="number" id="token-cap-input" class="settings-input" min="500" step="500" />
+        </div>
+        <div class="settings-item">
+          <span>Cache TTL (minutes)</span>
+          <input type="number" id="cache-ttl-input" class="settings-input" min="15" step="15" />
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-label">Data</div>
+        <div class="settings-buttons">
+          <button class="button secondary" id="export-settings-btn">Export</button>
+          <button class="button secondary" id="import-settings-btn">Import</button>
+          <button class="button secondary" id="forget-all-btn">Forget</button>
+        </div>
+        <input type="file" id="import-settings-input" accept="application/json" style="display:none" />
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./sidebar.ts"></script>
+</body>
+</html>

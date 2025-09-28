@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to Nebula AI Copilot</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      background: linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 100%);
+      color: #111827;
+    }
+
+    .hero {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 64px 24px 32px;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: 40px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: #312E81;
+    }
+
+    .hero p {
+      font-size: 18px;
+      line-height: 1.6;
+      color: #4338CA;
+      margin: 0 auto 24px;
+      max-width: 540px;
+    }
+
+    .card-grid {
+      display: grid;
+      gap: 16px;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 0 24px 64px;
+    }
+
+    @media (min-width: 768px) {
+      .card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(79, 70, 229, 0.12);
+      text-align: left;
+      border: 1px solid rgba(99, 102, 241, 0.08);
+    }
+
+    .card h2 {
+      font-size: 18px;
+      margin-bottom: 12px;
+      color: #4338CA;
+    }
+
+    .card p {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #4B5563;
+      margin-bottom: 12px;
+    }
+
+    .card ul {
+      padding-left: 18px;
+      margin: 0;
+      color: #4B5563;
+    }
+
+    .card li {
+      margin-bottom: 6px;
+    }
+
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #4F46E5;
+      color: white;
+      padding: 12px 18px;
+      border-radius: 999px;
+      text-decoration: none;
+      font-weight: 600;
+      box-shadow: 0 10px 25px rgba(79, 70, 229, 0.35);
+    }
+
+    .cta span {
+      font-family: monospace;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+
+    .footer {
+      text-align: center;
+      padding: 32px 24px 48px;
+      color: #6B7280;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <img src="icons/icon-128.svg" alt="Nebula" width="80" height="80" style="margin-bottom: 16px; border-radius: 20px;" />
+    <h1>Welcome to Nebula</h1>
+    <p>
+      Nebula is a privacy-first AI copilot that lives inside Chrome. Trigger the
+      command palette anywhere, bundle page context locally, and let Nebula act
+      like a human teammate—only when you give the go-ahead.
+    </p>
+    <a class="cta" href="chrome://extensions/shortcuts" target="_blank" rel="noreferrer">
+      Set your hotkey <span>Ctrl / ⌘ + Shift + Space</span>
+    </a>
+  </section>
+
+  <section class="card-grid">
+    <article class="card">
+      <h2>1. Grant core permissions</h2>
+      <p>Click the puzzle icon → Nebula → Allow the following to unlock the basics:</p>
+      <ul>
+        <li><strong>activeTab</strong> and <strong>tabs</strong> for navigation</li>
+        <li><strong>storage</strong> to keep preferences</li>
+        <li><strong>commands</strong> for the global hotkey</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <h2>2. Optional boosts</h2>
+      <p>Enable only if you want deeper recall:</p>
+      <ul>
+        <li><strong>history & sessions</strong> for Spotlight reopen</li>
+        <li><strong>downloads</strong> for CSV export</li>
+        <li><strong>clipboard</strong> to push AI answers</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <h2>3. Privacy guardrails</h2>
+      <p>
+        Nebula masks obvious PII, keeps context local, and lets you view exactly
+        what was shared with the AI every time.
+      </p>
+    </article>
+
+    <article class="card">
+      <h2>4. Try a quick win</h2>
+      <p>Open any page and press your hotkey:</p>
+      <ul>
+        <li>“Summarize this page in 3 bullets”</li>
+        <li>“Switch to my email tab”</li>
+        <li>“Fill the job title field with Software Engineer”</li>
+      </ul>
+    </article>
+  </section>
+
+  <footer class="footer">
+    Toggle Safe Mode anytime from the sidebar. Nebula never sends chrome:// pages or private browsing data.
+  </footer>
+</body>
+</html>

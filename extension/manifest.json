@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Nebula AI Copilot",
+  "version": "1.0.0",
+  "description": "Site-agnostic, privacy-first AI that lives in Chrome.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "history",
+    "sessions"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "Nebula AI Copilot",
+    "default_popup": "popup/index.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "commands": {
+    "open-command-palette": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Space",
+        "mac": "Command+Shift+Space"
+      },
+      "description": "Open the Nebula command palette"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["content.css", "sidebar/index.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

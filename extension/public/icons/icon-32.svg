@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="nebulaGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#9333EA"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="32" fill="#0F172A"/>
+  <circle cx="64" cy="64" r="42" fill="url(#nebulaGradient)" opacity="0.85"/>
+  <path d="M64 32c-13.255 0-24 10.745-24 24 0 10.954 7.292 20.193 17.266 23.1a4 4 0 012.734 3.812V96a4 4 0 006.293 3.172l11.414-8.56a4 4 0 001.547-3.147V79.37c9.974-2.907 17.266-12.146 17.266-23.1 0-13.255-10.745-24-24-24H64z" fill="#F8FAFC" opacity="0.9"/>
+  <circle cx="52" cy="58" r="6" fill="#1E293B" opacity="0.8"/>
+  <circle cx="76" cy="58" r="6" fill="#1E293B" opacity="0.8"/>
+  <path d="M52 74c4 6 12 6 16 0" stroke="#1E293B" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
+</svg>

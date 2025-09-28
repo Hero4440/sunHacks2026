@@ -1,17 +1,18 @@
 name = "nebula-worker"
 main = "src/index.ts"
 compatibility_date = "2024-09-20"
+workers_dev = true
 
 [vars]
-# GEMINI_API_KEY = "set-this-in-dashboard"
+# GEMINI_API_KEY = "AIzaSyA2olNsQ6Y93tsAgb4BDPLx7Tkue-qJZ78"
 # ALLOWED_ORIGINS = "https://example.com,chrome-extension://<id>"
 # WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
 
 [[kv_namespaces]]
 binding = "SUMMARIES_KV"
 # Replace with IDs from `wrangler kv:namespace create`
-id = "ac91e4eae2ab4dd5b0d8c1cd993b093c"
-preview_id = "e72fa5db9e104f279f5087f1b9f6a327"
+id = "d056f17e2fbe41f4936f5eb8edb6168e"
+preview_id = "d1eb6b6b90a74735a6150b29c12db91b"
 
 [ai]
 binding = "AI"

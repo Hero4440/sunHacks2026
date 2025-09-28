@@ -48,11 +48,11 @@
 **Location**: User's Chrome browser
 **Purpose**: All user-facing interfaces
 **Components**:
-- **Command Palette** - Global hotkey (⌘/Ctrl+Shift+Space) overlay
-- **Sidebar Panel** - Q&A responses, action plan preview, settings
-- **Popup Window** - Quick access when clicking extension icon
-- **Tooltip Overlays** - Element highlighting and disambiguation
-- **Settings Interface** - Privacy controls, per-site permissions
+- **Spotlight Search** - Mac Spotlight-style instant search (⌘/Ctrl+Shift+Z)
+- **Popup Interface** - Pure search box with live results (no buttons)
+- **Sidebar Panel** - AI assistant and contextual help
+- **Element Overlay** - Visual highlighting and disambiguation
+- **Command Palette** - Universal browser navigation and actions
 
 **Technologies**: React 18, Radix UI, Tailwind CSS, Shadow DOM
 **Storage**: IndexedDB for timeline, chrome.storage for settings
@@ -387,16 +387,20 @@ if (geminiDown) {
 
 ### Component Strategy
 ```tsx
-// Extension-specific component approach
-export const CommandPalette = () => (
-  <DropdownMenu.Root>
-    <DropdownMenu.Trigger className="nebula-hotkey-trigger">
-      ⌘K
-    </DropdownMenu.Trigger>
-    <DropdownMenu.Content className="nebula-palette">
-      {/* Isolated styling via className prefix */}
-    </DropdownMenu.Content>
-  </DropdownMenu.Root>
+// Spotlight-style search interface
+export const SpotlightSearch = () => (
+  <div className="nebula-spotlight-container">
+    <input
+      className="nebula-search-input"
+      placeholder="Search tabs, take screenshot, find elements..."
+      autoFocus
+    />
+    <div className="nebula-results-container">
+      {results.map(result => (
+        <SearchResult key={result.id} {...result} />
+      ))}
+    </div>
+  </div>
 );
 ```
 
