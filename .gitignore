@@ -34,6 +34,13 @@ storybook-static
 .DS_Store
 *.pem
 Thumbs.db
+.env*
+.dev.vars
+
+# worker local artifacts
+worker/.wrangler/
+worker/.dev.vars
+worker/.env
 
 # debug
 npm-debug.log*

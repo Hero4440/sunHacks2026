@@ -1,0 +1,12 @@
+# Dependencies
+node_modules
+
+# Wrangler local persistence / dev artifacts
+.wrangler/
+.pnp
+.pnp.js
+
+# Build outputs
+*.log
+wrangler-state.json
+
